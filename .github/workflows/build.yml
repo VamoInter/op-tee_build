@@ -83,7 +83,7 @@ jobs:
       - name: Build OP-TEE FVP
         run: |
           cd optee-fvp/build
-          make -f fvp.mk all -j$(nproc)
+          make -f fvp.mk all SPMC_AT_EL=1 -j$(nproc)
       - name: Upload build artifacts
         if: always()
         uses: actions/upload-artifact@v4
