@@ -1,0 +1,6 @@
+optee-fvp/
+*.log
+*.bin
+*.img
+*.elf
+*.map
