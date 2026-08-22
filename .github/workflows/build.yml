@@ -1,14 +1,11 @@
 name: Build OP-TEE FVP
-
 on:
   push:
     branches: ["main"]
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: ubuntu-22.04
-
     steps:
       - name: Install Dependencies
         run: |
@@ -66,7 +63,6 @@ jobs:
             xterm \
             xz-utils \
             zlib1g-dev
-
       - name: Install repo
         run: |
           mkdir -p "$HOME/bin"
@@ -74,30 +70,31 @@ jobs:
             -o "$HOME/bin/repo"
           chmod +x "$HOME/bin/repo"
           echo "$HOME/bin" >> "$GITHUB_PATH"
-
       - name: Sync OP-TEE Manifest
         run: |
           mkdir -p optee-fvp
           cd optee-fvp
           repo init -u https://github.com/OP-TEE/manifest.git -m fvp.xml
           repo sync -j$(nproc) --no-clone-bundle
-
       - name: Download official toolchains
         run: |
           cd optee-fvp/build
-          make -j2 toolchains
-
+          make -f fvp.mk toolchains
       - name: Build OP-TEE FVP
         run: |
           cd optee-fvp/build
-          make -j$(nproc)
-
+          make -f fvp.mk all -j$(nproc)
       - name: Upload build artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: optee-fvp-build
           path: |
-            optee-fvp/out/
-            optee-fvp/build/*.log
-          if-no-files-found: warn
+            optee-fvp/trusted-firmware-a/build/fvp/release/bl1.bin
+            optee-fvp/trusted-firmware-a/build/fvp/release/fip.bin
+            optee-fvp/out/boot-fat.uefi.img
+            optee-fvp/out/boot.scr
+            optee-fvp/out-br/images/rootfs.cpio.gz
+            optee-fvp/linux/arch/arm64/boot/Image
+            optee-fvp/linux/arch/arm64/boot/dts/arm/fvp-base-revc.dtb
+          if-no-files-found: error
