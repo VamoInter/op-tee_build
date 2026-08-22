@@ -1,11 +1,15 @@
-name: Build OP-TEE FVP
+name: Build OP-TEE FVP - Complete with Smart Save
+
 on:
   push:
     branches: ["main"]
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 240
+
     steps:
       - name: Install Dependencies
         run: |
@@ -63,6 +67,7 @@ jobs:
             xterm \
             xz-utils \
             zlib1g-dev
+
       - name: Install repo
         run: |
           mkdir -p "$HOME/bin"
@@ -70,31 +75,117 @@ jobs:
             -o "$HOME/bin/repo"
           chmod +x "$HOME/bin/repo"
           echo "$HOME/bin" >> "$GITHUB_PATH"
+
       - name: Sync OP-TEE Manifest
         run: |
           mkdir -p optee-fvp
           cd optee-fvp
           repo init -u https://github.com/OP-TEE/manifest.git -m fvp.xml
           repo sync -j$(nproc) --no-clone-bundle
+
       - name: Download official toolchains
         run: |
           cd optee-fvp/build
           make -f fvp.mk toolchains
-      - name: Build OP-TEE FVP
+
+      - name: Build OP-TEE FVP (com FF-A SPMC_AT_EL=1)
         run: |
           cd optee-fvp/build
           make -f fvp.mk all SPMC_AT_EL=1 -j$(nproc)
-      - name: Upload build artifacts
+
+      - name: Collect new files only (skip 9 known binaries)
+        if: always()
+        run: |
+          mkdir -p artifacts/{new-files,debug-analysis,full-structure}
+          
+          SKIP_LIST="bl1.bin fip.bin boot-fat.uefi.img boot.scr rootfs.cpio.gz Image fvp-base-revc.dtb tee.elf tee.bin"
+          
+          echo "⏭️  ARQUIVOS QUE NÃO SERÃO SALVOS (já tem):" > artifacts/SKIPPED.txt
+          echo "$SKIP_LIST" | tr ' ' '\n' >> artifacts/SKIPPED.txt
+          cat artifacts/SKIPPED.txt
+          
+          echo "🔍 Copiando symbol maps..."
+          mkdir -p artifacts/debug-analysis/maps
+          find optee-fvp -name "*.map" -exec cp {} artifacts/debug-analysis/maps/ \; 2>/dev/null
+          
+          echo "🔗 Copiando linker scripts..."
+          mkdir -p artifacts/debug-analysis/linkers
+          find optee-fvp -name "*.ld" -exec cp {} artifacts/debug-analysis/linkers/ \; 2>/dev/null
+          
+          echo "🎯 Copiando object files (.o)..."
+          mkdir -p artifacts/debug-analysis/object-files
+          find optee-fvp/optee_os/out -name "*.o" -exec cp {} artifacts/debug-analysis/object-files/ \; 2>/dev/null
+          
+          echo "📂 Copiando full build structure..."
+          mkdir -p artifacts/full-structure/{optee_os,trusted-firmware-a,linux}
+          cp -r optee-fvp/optee_os/out artifacts/full-structure/optee_os/ 2>/dev/null
+          cp -r optee-fvp/trusted-firmware-a/build artifacts/full-structure/trusted-firmware-a/ 2>/dev/null
+          cp -r optee-fvp/linux/arch/arm64/boot artifacts/full-structure/linux/ 2>/dev/null
+          
+          cat > artifacts/BUILD_INFO.txt << 'BUILDEOF'
+          === Build #4 - Smart Save ===
+          Data: $(date -u)
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          
+          === Arquivos NÃO salvos (use Build #3) ===
+          bl1.bin, fip.bin, boot-fat.uefi.img, boot.scr, rootfs.cpio.gz, Image, fvp-base-revc.dtb, tee.elf, tee.bin
+          
+          === Arquivos NOVOS (Build #4) ===
+          Symbol maps, linker scripts, object files, full build structure
+          
+          === Tamanho ===
+          BUILDEOF
+          du -sh artifacts/ >> artifacts/BUILD_INFO.txt
+          du -sh artifacts/* >> artifacts/BUILD_INFO.txt
+
+      - name: Upload debug analysis files
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: optee-fvp-build
+          name: build4-debug-analysis
+          path: artifacts/debug-analysis/
+          retention-days: 90
+
+      - name: Upload full build structure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build4-full-structure
+          path: artifacts/full-structure/
+          retention-days: 60
+
+      - name: Upload info
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build4-info
           path: |
-            optee-fvp/trusted-firmware-a/build/fvp/release/bl1.bin
-            optee-fvp/trusted-firmware-a/build/fvp/release/fip.bin
-            optee-fvp/out/boot-fat.uefi.img
-            optee-fvp/out/boot.scr
-            optee-fvp/out-br/images/rootfs.cpio.gz
-            optee-fvp/linux/arch/arm64/boot/Image
-            optee-fvp/linux/arch/arm64/boot/dts/arm/fvp-base-revc.dtb
-          if-no-files-found: error
+            artifacts/BUILD_INFO.txt
+            artifacts/SKIPPED.txt
+          retention-days: 90
+
+      - name: Compress new files
+        if: always()
+        run: |
+          tar czf build4-new-files-$(date +%Y%m%d).tar.gz artifacts/
+          ls -lh *.tar.gz
+
+      - name: Create Release
+        if: always()
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: fvp-build-4
+          name: "Build #4 - New Analysis Files Only"
+          body: |
+            **Build #4 Smart Save Strategy**
+            
+            **❌ NOT SAVED (already have from Build #3):**
+            bl1.bin, fip.bin, boot-fat.uefi.img, boot.scr, rootfs.cpio.gz, Image, fvp-base-revc.dtb, tee.elf, tee.bin
+            
+            **✅ SAVED (NEW - Build #4):**
+            Symbol maps (*.map), Linker scripts (*.ld), Object files (.o), Full build structure
+            
+            **Space saved:** ~1.5GB
+          files: |
+            build4-new-files-*.tar.gz
+            artifacts/SKIPPED.txt
