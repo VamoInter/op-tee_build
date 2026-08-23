@@ -10,9 +10,6 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Free up disk space
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc "/usr/local/share/boost" "$AGENT_TOOLSDIRECTORY" /usr/local/lib/android
@@ -39,7 +36,17 @@ jobs:
           chmod +x "$HOME/bin/repo"
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
+      - name: Cache Toolchains and Repo
+        id: cache-toolchains
+        uses: actions/cache@v4
+        with:
+          path: |
+            optee-fvp/toolchains
+            optee-fvp/.repo
+          key: ${{ runner.os }}-optee-fvp-cache-v1
+
       - name: Sync OP-TEE Manifest
+        if: steps.cache-toolchains.outputs.cache-hit != 'true'
         run: |
           mkdir -p optee-fvp
           cd optee-fvp
@@ -47,6 +54,7 @@ jobs:
           repo sync -j$(nproc) --no-clone-bundle
 
       - name: Download official toolchains
+        if: steps.cache-toolchains.outputs.cache-hit != 'true'
         run: |
           cd optee-fvp/build
           make -f fvp.mk toolchains
@@ -67,16 +75,19 @@ jobs:
           cd optee-lkm
           make KDIR=$(pwd)/../optee-fvp/linux ARCH=arm64 CROSS_COMPILE=$(pwd)/../optee-fvp/toolchains/aarch64/bin/aarch64-linux-gnu-
 
-      - name: Inject Exploit into Rootfs Image
-        run: |
-          mcopy -i optee-fvp/out/boot-fat.uefi.img optee-lkm/exploit.ko ::/
-
       - name: List generated artifacts
         if: always()
         run: |
-          echo "=== BINs ===" && find . -name "*.bin" | sort
-          echo "=== IMGs ===" && find . -name "*.img" | sort
-          echo "=== KOs ===" && find . -name "*.ko" | sort
+          echo "=== BINs gerados ==="
+          find . -name "*.bin" | sort
+          echo "=== IMGs gerados ==="
+          find . -name "*.img" | sort
+          echo "=== KOs gerados ==="
+          find . -name "*.ko" | sort
+
+      - name: Inject Exploit into Rootfs Image
+        run: |
+          mcopy -i optee-fvp/out/boot-fat.uefi.img optee-lkm/exploit.ko ::/
 
       - name: Upload build artifacts
         if: always()
