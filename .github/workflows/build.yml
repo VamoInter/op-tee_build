@@ -48,6 +48,24 @@ jobs:
             optee-fvp/.repo
           key: ${{ runner.os }}-optee-fvp-cache-v1
 
+      - name: Cache toolchains
+        uses: actions/cache@v4
+        with:
+          path: optee-fvp/toolchains
+          key: toolchains-${{ hashFiles('optee-fvp/build/fvp.mk') }}
+          restore-keys: toolchains-
+
+      - name: Cache OP-TEE sources
+        uses: actions/cache@v4
+        with:
+          path: |
+            optee-fvp/trusted-firmware-a
+            optee-fvp/optee_os
+            optee-fvp/linux
+            optee-fvp/u-boot
+          key: optee-src-${{ hashFiles('optee-fvp/.repo/manifests/fvp.xml') }}
+          restore-keys: optee-src-
+
       - name: Sync OP-TEE Manifest
         if: steps.cache-toolchains.outputs.cache-hit != 'true'
         run: |
