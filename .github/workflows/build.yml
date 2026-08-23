@@ -44,8 +44,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: optee-fvp/toolchains
-          key: toolchains-fvp-v1
-          restore-keys: toolchains-fvp-
+          key: toolchains-
+          restore-keys: toolchains-
 
       - name: Cache OP-TEE sources
         id: cache-src
@@ -58,8 +58,8 @@ jobs:
             optee-fvp/u-boot
             optee-fvp/build
             optee-fvp/.repo
-          key: optee-src-fvp-v1
-          restore-keys: optee-src-fvp-
+          key: Linux-optee-fvp-cache-v1
+          restore-keys: Linux-optee-fvp-
 
       - name: Sync OP-TEE Manifest
         if: steps.cache-src.outputs.cache-hit != 'true'
