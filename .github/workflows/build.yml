@@ -63,6 +63,7 @@ jobs:
             optee-fvp/optee_os
             optee-fvp/linux
             optee-fvp/u-boot
+            optee-fvp/build
           key: optee-src-${{ hashFiles('optee-fvp/.repo/manifests/fvp.xml') }}
           restore-keys: optee-src-
 
