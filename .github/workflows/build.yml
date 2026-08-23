@@ -39,22 +39,13 @@ jobs:
           chmod +x "$HOME/bin/repo"
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
-      - name: Cache Toolchains and Repo
-        id: cache-toolchains
-        uses: actions/cache@v4
-        with:
-          path: |
-            optee-fvp/toolchains
-            optee-fvp/.repo
-          key: ${{ runner.os }}-optee-fvp-cache-v1
-
       - name: Cache toolchains
         id: cache-toolchains
         uses: actions/cache@v4
         with:
           path: optee-fvp/toolchains
-          key: toolchains-${{ hashFiles('optee-fvp/build/fvp.mk') }}
-          restore-keys: toolchains-
+          key: toolchains-fvp-v1
+          restore-keys: toolchains-fvp-
 
       - name: Cache OP-TEE sources
         id: cache-src
@@ -66,11 +57,12 @@ jobs:
             optee-fvp/linux
             optee-fvp/u-boot
             optee-fvp/build
-          key: optee-src-${{ hashFiles('optee-fvp/.repo/manifests/fvp.xml') }}
-          restore-keys: optee-src-
+            optee-fvp/.repo
+          key: optee-src-fvp-v1
+          restore-keys: optee-src-fvp-
 
       - name: Sync OP-TEE Manifest
-        if: steps.cache-toolchains.outputs.cache-hit != 'true'
+        if: steps.cache-src.outputs.cache-hit != 'true'
         run: |
           mkdir -p optee-fvp
           cd optee-fvp
@@ -99,19 +91,16 @@ jobs:
           cd optee-lkm
           make KDIR=$(pwd)/../optee-fvp/linux ARCH=arm64 CROSS_COMPILE=$(pwd)/../optee-fvp/toolchains/aarch64/bin/aarch64-linux-gnu-
 
-      - name: List generated artifacts
-        if: always()
-        run: |
-          echo "=== BINs gerados ==="
-          find . -name "*.bin" | sort
-          echo "=== IMGs gerados ==="
-          find . -name "*.img" | sort
-          echo "=== KOs gerados ==="
-          find . -name "*.ko" | sort
-
       - name: Inject Exploit into Rootfs Image
         run: |
           mcopy -i optee-fvp/out/boot-fat.uefi.img optee-lkm/exploit.ko ::/
+
+      - name: List generated artifacts
+        if: always()
+        run: |
+          echo "=== BINs ===" && find . -name "*.bin" | sort
+          echo "=== IMGs ===" && find . -name "*.img" | sort
+          echo "=== KOs ===" && find . -name "*.ko" | sort
 
       - name: Upload build artifacts
         if: always()
