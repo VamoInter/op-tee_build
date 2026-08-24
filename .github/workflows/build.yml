@@ -10,14 +10,14 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Free up disk space
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc "/usr/local/share/boost" "$AGENT_TOOLSDIRECTORY" /usr/local/lib/android
           sudo apt-get clean
           df -h
+
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Install Dependencies
         run: |
@@ -39,38 +39,36 @@ jobs:
           chmod +x "$HOME/bin/repo"
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
-      - name: Cache toolchains
-        id: cache-toolchains
-        uses: actions/cache@v4
-        with:
-          path: optee-fvp/toolchains
-          key: toolchains-
-          restore-keys: toolchains-
-
-      - name: Cache OP-TEE sources
-        id: cache-src
+      - name: Cache Toolchains and Sources
+        id: cache-ts
         uses: actions/cache@v4
         with:
           path: |
-            optee-fvp/trusted-firmware-a
-            optee-fvp/optee_os
-            optee-fvp/linux
-            optee-fvp/u-boot
-            optee-fvp/build
+            optee-fvp/toolchains
             optee-fvp/.repo
-          key: Linux-optee-fvp-cache-v1
-          restore-keys: Linux-optee-fvp-
+            optee-fvp/linux
+            optee-fvp/optee_os
+            optee-fvp/trusted-firmware-a
+            optee-fvp/u-boot
+            optee-fvp/buildroot
+          key: ${{ runner.os }}-optee-sources-v3
 
-      - name: Sync OP-TEE Manifest
-        if: steps.cache-src.outputs.cache-hit != 'true'
+      - name: Sync OP-TEE Manifest (Full)
+        if: steps.cache-ts.outputs.cache-hit != 'true'
         run: |
           mkdir -p optee-fvp
           cd optee-fvp
           repo init -u https://github.com/OP-TEE/manifest.git -m fvp.xml
           repo sync -j$(nproc) --no-clone-bundle
 
+      - name: Sync missing repos (buildroot)
+        if: steps.cache-ts.outputs.cache-hit == 'true'
+        run: |
+          cd optee-fvp
+          repo sync -j$(nproc) buildroot
+
       - name: Download official toolchains
-        if: steps.cache-toolchains.outputs.cache-hit != 'true'
+        if: steps.cache-ts.outputs.cache-hit != 'true'
         run: |
           cd optee-fvp/build
           make -f fvp.mk toolchains
@@ -94,13 +92,6 @@ jobs:
       - name: Inject Exploit into Rootfs Image
         run: |
           mcopy -i optee-fvp/out/boot-fat.uefi.img optee-lkm/exploit.ko ::/
-
-      - name: List generated artifacts
-        if: always()
-        run: |
-          echo "=== BINs ===" && find . -name "*.bin" | sort
-          echo "=== IMGs ===" && find . -name "*.img" | sort
-          echo "=== KOs ===" && find . -name "*.ko" | sort
 
       - name: Upload build artifacts
         if: always()
