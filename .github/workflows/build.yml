@@ -39,36 +39,22 @@ jobs:
           chmod +x "$HOME/bin/repo"
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
-      - name: Cache Toolchains and Sources
-        id: cache-ts
+      - name: Cache Toolchains
+        id: cache-toolchains
         uses: actions/cache@v4
         with:
-          path: |
-            optee-fvp/toolchains
-            optee-fvp/.repo
-            optee-fvp/linux
-            optee-fvp/optee_os
-            optee-fvp/trusted-firmware-a
-            optee-fvp/u-boot
-            optee-fvp/buildroot
-          key: ${{ runner.os }}-optee-sources-v3
+          path: optee-fvp/toolchains
+          key: ${{ runner.os }}-optee-toolchains-v1
 
-      - name: Sync OP-TEE Manifest (Full)
-        if: steps.cache-ts.outputs.cache-hit != 'true'
+      - name: Sync OP-TEE Manifest
         run: |
           mkdir -p optee-fvp
           cd optee-fvp
           repo init -u https://github.com/OP-TEE/manifest.git -m fvp.xml
           repo sync -j$(nproc) --no-clone-bundle
 
-      - name: Sync missing repos (buildroot)
-        if: steps.cache-ts.outputs.cache-hit == 'true'
-        run: |
-          cd optee-fvp
-          repo sync -j$(nproc) buildroot
-
       - name: Download official toolchains
-        if: steps.cache-ts.outputs.cache-hit != 'true'
+        if: steps.cache-toolchains.outputs.cache-hit != 'true'
         run: |
           cd optee-fvp/build
           make -f fvp.mk toolchains
