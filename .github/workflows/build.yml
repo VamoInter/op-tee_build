@@ -1,4 +1,4 @@
-name: Build OP-TEE FVP + Exploit LKM
+name: Build OP-TEE FVP + TFTF Attack
 
 on:
   push:
@@ -10,41 +10,43 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Free up disk space
+      - name: Free disk space
         run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc "/usr/local/share/boost" "$AGENT_TOOLSDIRECTORY" /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet /opt/ghc \
+            "/usr/local/share/boost" "$AGENT_TOOLSDIRECTORY" \
+            /usr/local/lib/android
           sudo apt-get clean
           df -h
 
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            android-tools-adb android-tools-fastboot acpica-tools autoconf automake \
-            bc bison build-essential ccache cscope curl device-tree-compiler e2tools \
-            expect flex gdisk git libattr1-dev libcap-ng-dev libfdt-dev libftdi-dev \
-            libglib2.0-dev libgmp3-dev libgnutls28-dev libhidapi-dev libmpc-dev \
-            libncurses5-dev libpixman-1-dev libslirp-dev libssl-dev libtool \
-            libusb-1.0-0-dev make mtools netcat ninja-build python3-cryptography \
-            python3-pip python3-pyelftools python3-serial python3-tomli python-is-python3 \
-            rsync swig unzip uuid-dev wget xdg-utils xsltproc xterm xz-utils zlib1g-dev
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            repo git curl wget python3 python3-pip \
+            make cmake ninja-build pkg-config \
+            libssl-dev libglib2.0-dev libpixman-1-dev \
+            device-tree-compiler bc bison flex \
+            dosfstools mtools cpio \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
-      - name: Install repo
-        run: |
-          mkdir -p "$HOME/bin"
-          curl -L https://storage.googleapis.com/git-repo-downloads/repo -o "$HOME/bin/repo"
-          chmod +x "$HOME/bin/repo"
-          echo "$HOME/bin" >> "$GITHUB_PATH"
-
+      # ── Cache toolchains (mesma key — não invalida o existente) ──
       - name: Cache Toolchains
         id: cache-toolchains
         uses: actions/cache@v4
         with:
           path: optee-fvp/toolchains
           key: ${{ runner.os }}-optee-toolchains-v1
+
+      # ── Cache sources (separado para não misturar) ──
+      - name: Cache Sources
+        id: cache-sources
+        uses: actions/cache@v4
+        with:
+          path: optee-fvp/sources
+          key: ${{ runner.os }}-optee-sources-v2
 
       - name: Sync OP-TEE Manifest
         run: |
@@ -53,40 +55,146 @@ jobs:
           repo init -u https://github.com/OP-TEE/manifest.git -m fvp.xml
           repo sync -j$(nproc) --no-clone-bundle
 
-      - name: Download official toolchains
+      - name: Download toolchains
         if: steps.cache-toolchains.outputs.cache-hit != 'true'
         run: |
           cd optee-fvp/build
           make -f fvp.mk toolchains
 
-      - name: Build OP-TEE FVP (with SPMC_AT_EL=1)
+      # ── Build principal: OP-TEE + TF-A + Linux ──
+      # CFG_SECURE_PARTITION=y: traz helpers FF-A de memória no OP-TEE
+      # CFG_CORE_SEL1_SPMC=y:   SPMC em S-EL1 (OP-TEE)
+      # DEBUG=1 no TF-A e OP-TEE: gera ELF/MAP sem quebrar testes
+      - name: Build OP-TEE FVP
         run: |
           cd optee-fvp/build
-          make -f fvp.mk all SPMC_AT_EL=1 -j$(nproc)
+          make -f fvp.mk all \
+            SPMC_AT_EL=1 \
+            CFG_SECURE_PARTITION=y \
+            DEBUG=1 \
+            -j$(nproc) \
+            2>&1 | tee /tmp/build_optee.log
 
-      - name: Prepare Linux Kernel for LKM
+      # ── Injetar nosso teste no TFTF ──
+      - name: Inject test sources into TFTF
         run: |
-          cd optee-fvp/linux
-          make ARCH=arm64 CROSS_COMPILE=../toolchains/aarch64/bin/aarch64-linux-gnu- defconfig
-          make ARCH=arm64 CROSS_COMPILE=../toolchains/aarch64/bin/aarch64-linux-gnu- modules_prepare -j$(nproc)
+          TFTF=$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a-tests
+          FRAG=$TFTF/tftf/tests/runtime_services/secure_service/ffa_frag_mismatch
+          TEST_SRC=$GITHUB_WORKSPACE/tftf-tests
 
-      - name: Compile Exploit LKM
+          mkdir -p $FRAG
+
+          # Copiar nosso arquivo de teste
+          cp $TEST_SRC/test_op_tee_oob_claude.c $FRAG/
+
+          # Copiar mk e xml (define o test suite op-tee-oob)
+          cp $TEST_SRC/tests-op-tee-oob.mk $TFTF/tftf/tests/
+          cp $TEST_SRC/tests-op-tee-oob.xml $TFTF/tftf/tests/
+
+      # ── Build TFTF ──
+      - name: Build TFTF
         run: |
-          cd optee-lkm
-          make KDIR=$(pwd)/../optee-fvp/linux ARCH=arm64 CROSS_COMPILE=$(pwd)/../optee-fvp/toolchains/aarch64/bin/aarch64-linux-gnu-
+          TFTF=$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a-tests
+          CROSS=$(ls $GITHUB_WORKSPACE/optee-fvp/toolchains/aarch64/bin/aarch64-*-gcc \
+                  | head -1 | sed 's/gcc$//')
 
-      - name: Inject Exploit into Rootfs Image
+          cd $TFTF
+          make \
+            CROSS_COMPILE=$CROSS \
+            PLAT=fvp \
+            DEBUG=1 \
+            TESTS=op-tee-oob \
+            -j$(nproc) \
+            2>&1 | tee /tmp/build_tftf.log
+
+      # ── Montar fip_tftf.bin ──
+      - name: Package fip_tftf.bin
         run: |
-          mcopy -i optee-fvp/out/boot-fat.uefi.img optee-lkm/exploit.ko ::/
+          TFTF=$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a-tests
+          TFA=$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a
+          FIP=$TFA/build/fvp/release
+          FIPTOOL=$TFA/tools/fiptool/fiptool
 
-      - name: Upload build artifacts
+          # Extrair componentes do fip.bin original
+          mkdir -p /tmp/fip_parts
+          $FIPTOOL unpack $FIP/fip.bin --out /tmp/fip_parts --force
+
+          # Criar fip_tftf.bin com TFTF como BL33
+          $FIPTOOL create \
+            --tb-fw           /tmp/fip_parts/bl2.bin \
+            --tb-fw-config    /tmp/fip_parts/tb-fw-config.dtb \
+            --soc-fw          /tmp/fip_parts/bl31.bin \
+            --soc-fw-config   /tmp/fip_parts/soc-fw-config.dtb \
+            --tos-fw          /tmp/fip_parts/bl32.bin \
+            --tos-fw-config   /tmp/fip_parts/tos-fw-config.dtb \
+            --nt-fw           $TFTF/build/fvp/debug/tftf.bin \
+            --nt-fw-config    /tmp/fip_parts/nt-fw-config.dtb \
+            --hw-config       /tmp/fip_parts/hw-config.dtb \
+            --fw-config       /tmp/fip_parts/fw-config.dtb \
+            /tmp/fip_tftf.bin
+
+          echo "fip_tftf.bin: $(stat -c%s /tmp/fip_tftf.bin) bytes"
+
+      # ── Coletar todos os artefatos ──
+      - name: Collect artifacts
+        run: |
+          mkdir -p /tmp/artifacts/binaries
+          mkdir -p /tmp/artifacts/debug
+          mkdir -p /tmp/artifacts/logs
+
+          TFA=$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a
+          TFTF=$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a-tests
+
+          # Binários principais
+          cp $TFA/build/fvp/release/bl1.bin     /tmp/artifacts/binaries/
+          cp $TFA/build/fvp/release/fip.bin     /tmp/artifacts/binaries/
+          cp /tmp/fip_tftf.bin                  /tmp/artifacts/binaries/
+          cp $GITHUB_WORKSPACE/optee-fvp/out/boot-fat.uefi.img \
+                                                /tmp/artifacts/binaries/ 2>/dev/null || true
+
+          # Debug: ELF e MAP
+          find $TFA/build/fvp/release -name "*.elf" -o -name "*.map" | \
+            xargs -I{} cp {} /tmp/artifacts/debug/ 2>/dev/null || true
+          find $TFTF/build/fvp/debug -name "*.elf" -o -name "*.map" | \
+            xargs -I{} cp {} /tmp/artifacts/debug/ 2>/dev/null || true
+
+          # OP-TEE ELF (para símbolos no Iris)
+          find $GITHUB_WORKSPACE/optee-fvp -name "tee.elf" | \
+            xargs -I{} cp {} /tmp/artifacts/debug/ 2>/dev/null || true
+
+          # Logs e configs
+          cp /tmp/build_optee.log /tmp/artifacts/logs/
+          cp /tmp/build_tftf.log  /tmp/artifacts/logs/
+
+          # Versões e commits
+          echo "=== COMMITS ===" > /tmp/artifacts/logs/versions.txt
+          git -C $GITHUB_WORKSPACE/optee-fvp/optee_os log --oneline -3 >> \
+            /tmp/artifacts/logs/versions.txt
+          git -C $TFA log --oneline -3 >> \
+            /tmp/artifacts/logs/versions.txt
+          git -C $TFTF log --oneline -3 >> \
+            /tmp/artifacts/logs/versions.txt
+
+          ls -lh /tmp/artifacts/binaries/
+          ls -lh /tmp/artifacts/debug/
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: optee-fvp-binaries
+          path: /tmp/artifacts/binaries/
+          if-no-files-found: error
+
+      - name: Upload debug symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: optee-fvp-debug
+          path: /tmp/artifacts/debug/
+          if-no-files-found: warn
+
+      - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: optee-fvp-exploit
-          path: |
-            optee-fvp/trusted-firmware-a/build/fvp/release/bl1.bin
-            optee-fvp/trusted-firmware-a/build/fvp/release/fip.bin
-            optee-fvp/out/boot-fat.uefi.img
-            optee-lkm/exploit.ko
-          if-no-files-found: error
+          name: optee-fvp-logs
+          path: /tmp/artifacts/logs/
