@@ -108,29 +108,36 @@ jobs:
             2>&1 | tee /tmp/build_tftf.log
 
       # ── Montar fip_tftf.bin ──
+      # ── Montar fip_tftf.bin ──
       - name: Package fip_tftf.bin
         run: |
           TFTF=$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a-tests
-          TFA=$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a
-          FIP=$TFA/build/fvp/release
-          FIPTOOL=$TFA/tools/fiptool/fiptool
 
-          # Extrair componentes do fip.bin original
+          FIPTOOL=$(find $GITHUB_WORKSPACE/optee-fvp -name "fiptool" -type f | grep -v '\.c\|\.o\|\.d' | head -1)
+          FIP_BIN=$(find $GITHUB_WORKSPACE/optee-fvp -name "fip.bin" -type f | grep -v tftf | head -1)
+
+          echo "FIPTOOL: $FIPTOOL"
+          echo "FIP_BIN: $FIP_BIN"
+          [ -z "$FIPTOOL" ] && echo "fiptool nao encontrado" && exit 1
+
           mkdir -p /tmp/fip_parts
-          $FIPTOOL unpack $FIP/fip.bin --out /tmp/fip_parts --force
+          $FIPTOOL unpack $FIP_BIN --out /tmp/fip_parts --force
+          ls -lh /tmp/fip_parts/
 
-          # Criar fip_tftf.bin com TFTF como BL33
+          OPTS=""
+          [ -f /tmp/fip_parts/tb-fw-config.dtb ]  && OPTS="$OPTS --tb-fw-config /tmp/fip_parts/tb-fw-config.dtb"
+          [ -f /tmp/fip_parts/soc-fw-config.dtb ] && OPTS="$OPTS --soc-fw-config /tmp/fip_parts/soc-fw-config.dtb"
+          [ -f /tmp/fip_parts/tos-fw-config.dtb ] && OPTS="$OPTS --tos-fw-config /tmp/fip_parts/tos-fw-config.dtb"
+          [ -f /tmp/fip_parts/nt-fw-config.dtb ]  && OPTS="$OPTS --nt-fw-config /tmp/fip_parts/nt-fw-config.dtb"
+          [ -f /tmp/fip_parts/hw-config.dtb ]     && OPTS="$OPTS --hw-config /tmp/fip_parts/hw-config.dtb"
+          [ -f /tmp/fip_parts/fw-config.dtb ]     && OPTS="$OPTS --fw-config /tmp/fip_parts/fw-config.dtb"
+
           $FIPTOOL create \
-            --tb-fw           /tmp/fip_parts/bl2.bin \
-            --tb-fw-config    /tmp/fip_parts/tb-fw-config.dtb \
-            --soc-fw          /tmp/fip_parts/bl31.bin \
-            --soc-fw-config   /tmp/fip_parts/soc-fw-config.dtb \
-            --tos-fw          /tmp/fip_parts/bl32.bin \
-            --tos-fw-config   /tmp/fip_parts/tos-fw-config.dtb \
-            --nt-fw           $TFTF/build/fvp/debug/tftf.bin \
-            --nt-fw-config    /tmp/fip_parts/nt-fw-config.dtb \
-            --hw-config       /tmp/fip_parts/hw-config.dtb \
-            --fw-config       /tmp/fip_parts/fw-config.dtb \
+            --tb-fw  /tmp/fip_parts/bl2.bin \
+            --soc-fw /tmp/fip_parts/bl31.bin \
+            --tos-fw /tmp/fip_parts/bl32.bin \
+            --nt-fw  $TFTF/build/fvp/debug/tftf.bin \
+            $OPTS \
             /tmp/fip_tftf.bin
 
           echo "fip_tftf.bin: $(stat -c%s /tmp/fip_tftf.bin) bytes"
