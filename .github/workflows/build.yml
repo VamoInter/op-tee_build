@@ -109,44 +109,49 @@ jobs:
 
       - name: Collect artifacts
         run: |
-          mkdir -p /tmp/artifacts/binaries
-          mkdir -p /tmp/artifacts/debug
-          mkdir -p /tmp/artifacts/logs
+          mkdir -p /tmp/artifacts/binaries /tmp/artifacts/debug /tmp/artifacts/logs
+          WS=$GITHUB_WORKSPACE/optee-fvp
+          TFTF=$WS/trusted-firmware-a-tests
 
-          TFA=$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a
-          TFTF=$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a-tests
+          echo "=== Procurando binarios ==="
+          find $WS -name "bl1.bin" | grep -v "\.o" | head -5
+          find $WS -name "fip.bin" | grep -v "\.o" | head -5
+          find $WS -name "boot-fat.uefi.img" | head -3
+          find $WS -name "tftf.bin" | head -3
 
-          # Binários principais
-          cp $TFA/build/fvp/release/bl1.bin     /tmp/artifacts/binaries/
-          cp $TFA/build/fvp/release/fip.bin     /tmp/artifacts/binaries/
-          cp $GITHUB_WORKSPACE/optee-fvp/out/boot-fat.uefi.img \
-                                                /tmp/artifacts/binaries/ 2>/dev/null || true
+          # bl1.bin e fip.bin — onde o fvp.mk os colocar
+          BL1=$(find $WS -name "bl1.bin" | grep -v "\.o" | head -1)
+          FIP=$(find $WS -name "fip.bin" | grep -v "\.o\|tftf" | head -1)
+          IMG=$(find $WS -name "boot-fat.uefi.img" | head -1)
+          TFTF_BIN=$(find $TFTF -name "tftf.bin" | head -1)
 
-          # Debug: ELF e MAP
-          find $TFA/build/fvp/release -name "*.elf" -o -name "*.map" | \
+          [ -n "$BL1" ]      && cp $BL1      /tmp/artifacts/binaries/bl1.bin
+          [ -n "$FIP" ]      && cp $FIP      /tmp/artifacts/binaries/fip.bin
+          [ -n "$IMG" ]      && cp $IMG      /tmp/artifacts/binaries/boot-fat.uefi.img
+          [ -n "$TFTF_BIN" ] && cp $TFTF_BIN /tmp/artifacts/binaries/tftf.bin
+
+          # ELF e MAP para debug
+          find $WS/trusted-firmware-a -name "*.elf" -o -name "*.map" 2>/dev/null | \
             xargs -I{} cp {} /tmp/artifacts/debug/ 2>/dev/null || true
-          find $TFTF/build/fvp/debug -name "*.elf" -o -name "*.map" | \
+          find $TFTF/build -name "*.elf" -o -name "*.map" 2>/dev/null | \
+            xargs -I{} cp {} /tmp/artifacts/debug/ 2>/dev/null || true
+          find $WS/optee_os -name "tee.elf" 2>/dev/null | \
             xargs -I{} cp {} /tmp/artifacts/debug/ 2>/dev/null || true
 
-          # OP-TEE ELF (para símbolos no Iris)
-          find $GITHUB_WORKSPACE/optee-fvp -name "tee.elf" | \
-            xargs -I{} cp {} /tmp/artifacts/debug/ 2>/dev/null || true
+          # Logs
+          cp /tmp/build_optee.log /tmp/artifacts/logs/ 2>/dev/null || true
+          cp /tmp/build_tftf.log  /tmp/artifacts/logs/ 2>/dev/null || true
 
-          # Logs e configs
-          cp /tmp/build_optee.log /tmp/artifacts/logs/
-          cp /tmp/build_tftf.log  /tmp/artifacts/logs/
-
-          # Versões e commits
+          # Versões
           echo "=== COMMITS ===" > /tmp/artifacts/logs/versions.txt
-          git -C $GITHUB_WORKSPACE/optee-fvp/optee_os log --oneline -3 >> \
-            /tmp/artifacts/logs/versions.txt
-          git -C $TFA log --oneline -3 >> \
-            /tmp/artifacts/logs/versions.txt
-          git -C $TFTF log --oneline -3 >> \
-            /tmp/artifacts/logs/versions.txt
+          git -C $WS/optee_os log --oneline -3 >> /tmp/artifacts/logs/versions.txt 2>/dev/null || true
+          git -C $WS/trusted-firmware-a log --oneline -3 >> /tmp/artifacts/logs/versions.txt 2>/dev/null || true
+          git -C $TFTF log --oneline -3 >> /tmp/artifacts/logs/versions.txt 2>/dev/null || true
 
+          echo "=== Resultado ==="
           ls -lh /tmp/artifacts/binaries/
-          ls -lh /tmp/artifacts/debug/
+          ls -lh /tmp/artifacts/debug/ | head -20
+
 
       - name: Upload binaries
         uses: actions/upload-artifact@v4
