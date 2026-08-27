@@ -114,15 +114,15 @@ jobs:
           TFTF=$WS/trusted-firmware-a-tests
 
           echo "=== Procurando binarios ==="
-          find $WS -name "bl1.bin" | grep -v "\.o" | head -5
-          find $WS -name "fip.bin" | grep -v "\.o" | head -5
-          find $WS -name "boot-fat.uefi.img" | head -3
+          find $WS/out -name "bl1.bin" | grep -v "\.o" | head -5
+          find $WS/out -name "fip.bin" | grep -v "\.o" | head -5
+          find $WS/out -name "boot-fat.uefi.img" | head -3
           find $WS -name "tftf.bin" | head -3
 
           # bl1.bin e fip.bin — onde o fvp.mk os colocar
-          BL1=$(find $WS -name "bl1.bin" | grep -v "\.o" | head -1)
-          FIP=$(find $WS -name "fip.bin" | grep -v "\.o\|tftf" | head -1)
-          IMG=$(find $WS -name "boot-fat.uefi.img" | head -1)
+          BL1=$(find $WS/out -name "bl1.bin" | grep -v "\.o" | head -1)
+          FIP=$(find $WS/out -name "fip.bin" | grep -v "\.o\|tftf" | head -1)
+          IMG=$(find $WS/out -name "boot-fat.uefi.img" | head -1)
           TFTF_BIN=$(find $TFTF -name "tftf.bin" | head -1)
 
           [ -n "$BL1" ]      && cp $BL1      /tmp/artifacts/binaries/bl1.bin
