@@ -82,3 +82,19 @@ $(head -109 .github/workflows/build.yml)
           ls -lh /tmp/artifacts/binaries/
           ls -lh /tmp/artifacts/debug/ | head -20
 
+      - name: Find build outputs
+        run: |
+          echo "=== find bl1.bin ==="
+          find $GITHUB_WORKSPACE/optee-fvp -name "bl1.bin" 2>/dev/null
+          echo "=== find fip.bin ==="
+          find $GITHUB_WORKSPACE/optee-fvp -name "fip.bin" 2>/dev/null
+          echo "=== find tee.bin ==="
+          find $GITHUB_WORKSPACE/optee-fvp -name "tee.bin" 2>/dev/null
+          echo "=== find boot-fat ==="
+          find $GITHUB_WORKSPACE/optee-fvp -name "boot-fat*" 2>/dev/null
+          echo "=== trusted-firmware-a/build ==="
+          find $GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a/build -maxdepth 4 \
+            -name "*.bin" 2>/dev/null | head -20
+          echo "=== optee-fvp/out ==="
+          ls -lh $GITHUB_WORKSPACE/optee-fvp/out/ 2>/dev/null || echo "sem out/"
+
