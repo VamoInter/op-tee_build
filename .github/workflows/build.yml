@@ -32,7 +32,7 @@ jobs:
             dosfstools mtools cpio \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
-      # ── Cache toolchains (mesma key — não invalida o existente) ──
+      # Cache toolchains (mesma key - nao invalida o existente)
       - name: Cache Toolchains
         id: cache-toolchains
         uses: actions/cache@v4
@@ -40,7 +40,7 @@ jobs:
           path: optee-fvp/toolchains
           key: ${{ runner.os }}-optee-toolchains-v1
 
-      # ── Cache sources (separado para não misturar) ──
+      # Cache sources (separado para nao misturar)
       - name: Cache Sources
         id: cache-sources
         uses: actions/cache@v4
@@ -61,8 +61,8 @@ jobs:
           cd optee-fvp/build
           make -f fvp.mk toolchains
 
-      # ── Build principal: OP-TEE + TF-A + Linux ──
-      # CFG_SECURE_PARTITION=y: traz helpers FF-A de memória no OP-TEE
+      # Build principal: OP-TEE + TF-A + Linux
+      # CFG_SECURE_PARTITION=y: traz helpers FF-A de memoria no OP-TEE
       # CFG_CORE_SEL1_SPMC=y:   SPMC em S-EL1 (OP-TEE)
       # DEBUG=1 no TF-A e OP-TEE: gera ELF/MAP sem quebrar testes
       - name: Build OP-TEE FVP
@@ -75,96 +75,58 @@ jobs:
             -j$(nproc) \
             2>&1 | tee /tmp/build_optee.log
 
-      # ── Injetar nosso teste no TFTF ──
+      # Injetar nosso teste no TFTF
       - name: Inject test sources into TFTF
         run: |
           TFTF=$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a-tests
           FRAG=$TFTF/tftf/tests/runtime_services/secure_service/ffa_frag_mismatch
           TEST_SRC=$GITHUB_WORKSPACE/tftf-tests
 
-          mkdir -p $FRAG
+          mkdir -p "$FRAG"
 
           # Copiar nosso arquivo de teste
-          cp $TEST_SRC/test_op_tee_oob_claude.c $FRAG/
+          cp "$TEST_SRC/test_op_tee_oob_claude.c" "$FRAG/"
 
           # Copiar mk e xml (define o test suite op-tee-oob)
-          cp $TEST_SRC/tests-op-tee-oob.mk $TFTF/tftf/tests/
-          cp $TEST_SRC/tests-op-tee-oob.xml $TFTF/tftf/tests/
+          cp "$TEST_SRC/tests-op-tee-oob.mk" "$TFTF/tftf/tests/"
+          cp "$TEST_SRC/tests-op-tee-oob.xml" "$TFTF/tftf/tests/"
 
-      # ── Build TFTF ──
+      # Build TFTF
       - name: Build TFTF
         run: |
           TFTF=$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a-tests
-          CROSS=$(ls $GITHUB_WORKSPACE/optee-fvp/toolchains/aarch64/bin/aarch64-*-gcc \
+          CROSS=$(ls "$GITHUB_WORKSPACE"/optee-fvp/toolchains/aarch64/bin/aarch64-*-gcc \
                   | head -1 | sed 's/gcc$//')
 
-          cd $TFTF
+          cd "$TFTF"
           make \
-            CROSS_COMPILE=$CROSS \
+            CROSS_COMPILE="$CROSS" \
             PLAT=fvp \
             DEBUG=1 \
             TESTS=op-tee-oob \
             -j$(nproc) \
             2>&1 | tee /tmp/build_tftf.log
 
-      - name: Collect artifacts
+      - name: Locate TFTF binary
+        if: always()
         run: |
-          mkdir -p /tmp/artifacts/binaries /tmp/artifacts/debug /tmp/artifacts/logs
-          WS=$GITHUB_WORKSPACE/optee-fvp
-          TFTF=$WS/trusted-firmware-a-tests
-
-          echo "=== Procurando binarios ==="
-          find $WS/out -name "bl1.bin" | grep -v "\.o" | head -5
-          find $WS/out -name "fip.bin" | grep -v "\.o" | head -5
-          find $WS/out -name "boot-fat.uefi.img" | head -3
-          find $WS -name "tftf.bin" | head -3
-
-          # bl1.bin e fip.bin — onde o fvp.mk os colocar
-          BL1=$(find $WS/out -name "bl1.bin" | grep -v "\.o" | head -1)
-          FIP=$(find $WS/out -name "fip.bin" | grep -v "\.o\|tftf" | head -1)
-          IMG=$(find $WS/out -name "boot-fat.uefi.img" | head -1)
-          TFTF_BIN=$(find $TFTF -name "tftf.bin" | head -1)
-
-          [ -n "$BL1" ]      && cp $BL1      /tmp/artifacts/binaries/bl1.bin
-          [ -n "$FIP" ]      && cp $FIP      /tmp/artifacts/binaries/fip.bin
-          [ -n "$IMG" ]      && cp $IMG      /tmp/artifacts/binaries/boot-fat.uefi.img
-          [ -n "$TFTF_BIN" ] && cp $TFTF_BIN /tmp/artifacts/binaries/tftf.bin
-
-          # ELF e MAP para debug
-          find $WS/trusted-firmware-a -name "*.elf" -o -name "*.map" 2>/dev/null | \
-            xargs -I{} cp {} /tmp/artifacts/debug/ 2>/dev/null || true
-          find $TFTF/build -name "*.elf" -o -name "*.map" 2>/dev/null | \
-            xargs -I{} cp {} /tmp/artifacts/debug/ 2>/dev/null || true
-          find $WS/optee_os -name "tee.elf" 2>/dev/null | \
-            xargs -I{} cp {} /tmp/artifacts/debug/ 2>/dev/null || true
-
-          # Logs
-          cp /tmp/build_optee.log /tmp/artifacts/logs/ 2>/dev/null || true
-          cp /tmp/build_tftf.log  /tmp/artifacts/logs/ 2>/dev/null || true
-
-          # Versões
-          echo "=== COMMITS ===" > /tmp/artifacts/logs/versions.txt
-          git -C $WS/optee_os log --oneline -3 >> /tmp/artifacts/logs/versions.txt 2>/dev/null || true
-          git -C $WS/trusted-firmware-a log --oneline -3 >> /tmp/artifacts/logs/versions.txt 2>/dev/null || true
-          git -C $TFTF log --oneline -3 >> /tmp/artifacts/logs/versions.txt 2>/dev/null || true
-
-          echo "=== Resultado ==="
-          ls -lh /tmp/artifacts/binaries/
-          ls -lh /tmp/artifacts/debug/ | head -20
-
+          echo "=== Procurando tftf.bin em toda a arvore ==="
+          find "$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a-tests" -iname "tftf.bin" -print
 
       - name: Upload binaries
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: optee-fvp-binaries
-          path: /tmp/artifacts/binaries/
-          if-no-files-found: error
-
-      - name: Upload debug symbols
-        uses: actions/upload-artifact@v4
-        with:
-          name: optee-fvp-debug
-          path: /tmp/artifacts/debug/
+          path: |
+            optee-fvp/trusted-firmware-a/build/fvp/release/bl1.bin
+            optee-fvp/trusted-firmware-a/build/fvp/release/fip.bin
+            optee-fvp/out/boot-fat.uefi.img
+            optee-fvp/out/boot.scr
+            optee-fvp/out-br/images/rootfs.cpio.gz
+            optee-fvp/linux/arch/arm64/boot/Image
+            optee-fvp/linux/arch/arm64/boot/dts/arm/fvp-base-revc.dtb
+            optee-fvp/trusted-firmware-a-tests/build/fvp/debug/tftf.bin
           if-no-files-found: warn
 
       - name: Upload logs
@@ -172,4 +134,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: optee-fvp-logs
-          path: /tmp/artifacts/logs/
+          path: |
+            /tmp/build_optee.log
+            /tmp/build_tftf.log
+          if-no-files-found: warn
