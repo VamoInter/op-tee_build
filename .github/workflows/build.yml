@@ -39,6 +39,13 @@ jobs:
           path: optee-fvp/toolchains
           key: ${{ runner.os }}-optee-toolchains-v1
 
+      - name: Cache Sources
+        id: cache-sources
+        uses: actions/cache@v4
+        with:
+          path: optee-fvp/sources
+          key: ${{ runner.os }}-optee-sources-v2
+
       - name: Sync OP-TEE Manifest
         run: |
           mkdir -p optee-fvp
@@ -49,6 +56,7 @@ jobs:
       - name: Clone TF-A Tests
         run: |
           cd optee-fvp
+
           if [ ! -d trusted-firmware-a-tests ]; then
             git clone --depth 1 \
               https://github.com/TrustedFirmware-A/tf-a-tests.git \
@@ -67,6 +75,7 @@ jobs:
       - name: Build OP-TEE FVP
         run: |
           cd optee-fvp/build
+
           make -f fvp.mk all \
             SPMC_AT_EL=1 \
             CFG_SECURE_PARTITION=y \
@@ -96,6 +105,7 @@ jobs:
           TFTF="$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a-tests"
 
           echo "=== Procurando mecanismo de registro dos testes ==="
+
           grep -Rni \
             "TESTS.*xml\|tests.*xml\|tests-op" \
             "$TFTF/tftf" \
@@ -134,6 +144,7 @@ jobs:
         if: always()
         run: |
           echo "=== Procurando tftf.bin ==="
+
           find "$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a-tests" \
             -type f \
             -name "tftf.bin" \
@@ -144,18 +155,33 @@ jobs:
           TFTF="$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a-tests/build/fvp/debug/tftf.bin"
           TFA="$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a"
 
+          CROSS=$(find "$GITHUB_WORKSPACE/optee-fvp/toolchains/aarch64/bin" \
+            -type f -name 'aarch64-*-gcc' \
+            -print -quit | sed 's/gcc$//')
+
           if [ ! -f "$TFTF" ]; then
             echo "ERRO: TFTF não encontrado:"
             echo "$TFTF"
             exit 1
           fi
 
+          if [ -z "$CROSS" ]; then
+            echo "ERRO: cross compiler não encontrado para o rebuild do FIP"
+            find "$GITHUB_WORKSPACE/optee-fvp/toolchains" \
+              -type f -name '*gcc' | head -30
+            exit 1
+          fi
+
           echo "=== TFTF ==="
           ls -lh "$TFTF"
+
+          echo "=== CROSS_COMPILE ==="
+          echo "$CROSS"
 
           cd "$TFA"
 
           make \
+            CROSS_COMPILE="$CROSS" \
             PLAT=fvp \
             DEBUG=1 \
             BL33="$TFTF" \
@@ -193,7 +219,7 @@ jobs:
             optee-fvp/linux/arch/arm64/boot/Image
             optee-fvp/linux/arch/arm64/boot/dts/arm/fvp-base-revc.dtb
             optee-fvp/trusted-firmware-a-tests/build/fvp/debug/tftf.bin
-          if-no-files-found: warn
+          if-no-files-found: error
 
       - name: Upload logs
         if: always()
@@ -204,4 +230,4 @@ jobs:
             /tmp/build_optee.log
             /tmp/build_tftf.log
             /tmp/build_fip_tftf.log
-          if-no-files-found: warn
+          if-no-files-found: error
