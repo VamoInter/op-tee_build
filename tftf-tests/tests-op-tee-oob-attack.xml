@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+  <testsuite name="OP-TEE OOB Read"
+             description="Tests OOB Read in OP-TEE via manipulated region_offs">
+    <testcase name="OP-TEE region_offs OOB"
+              function="test_op_tee_region_offs_oob" />
+  </testsuite>
+</testsuites>
