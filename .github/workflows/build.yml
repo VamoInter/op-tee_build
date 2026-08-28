@@ -75,16 +75,16 @@ jobs:
           cp "$TEST_SRC/tests-op-tee-oob.mk" "$TFTF/tftf/tests/"
           cp "$TEST_SRC/tests-op-tee-oob.xml" "$TFTF/tftf/tests/"
 
-          # Injeta o NOSSO teste (attack)
-          cp "$TEST_SRC/test_op_tee_oob_attack.c" "$FRAG/"
-          cp "$TEST_SRC/tests-op-tee-oob-attack.mk" "$TFTF/tftf/tests/"
-          cp "$TEST_SRC/tests-op-tee-oob-attack.xml" "$TFTF/tftf/tests/"
+          # Injeta o NOSSO teste (CWE-200 Fingerprint)
+          cp "$TEST_SRC/test_op_tee_oob_cwe200.c" "$FRAG/"
+          cp "$TEST_SRC/tests-op-tee-oob-cwe200.mk" "$TFTF/tftf/tests/"
+          cp "$TEST_SRC/tests-op-tee-oob-cwe200.xml" "$TFTF/tftf/tests/"
 
-          # Registra ambos os testes no build system
+          # Registra os testes no build system
           echo "include \${MAKEFILES_PATH}tests-op-tee-oob.mk" >> "$TFTF/tftf/tests/tests_common.mk"
-          echo "include \${MAKEFILES_PATH}tests-op-tee-oob-attack.mk" >> "$TFTF/tftf/tests/tests_common.mk"
+          echo "include \${MAKEFILES_PATH}tests-op-tee-oob-cwe200.mk" >> "$TFTF/tftf/tests/tests_common.mk"
 
-      - name: Build TFTF (Attack Version)
+      - name: Build TFTF (CWE-200 Version)
         run: |
           TFTF=$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a-tests
           CROSS=$(ls "$GITHUB_WORKSPACE"/optee-fvp/toolchains/aarch64/bin/aarch64-*-gcc \
@@ -95,7 +95,7 @@ jobs:
             CROSS_COMPILE="$CROSS" \
             PLAT=fvp \
             DEBUG=1 \
-            TESTS=op-tee-oob-attack \
+            TESTS=op-tee-oob-cwe200 \
             -j$(nproc) \
             2>&1 | tee /tmp/build_tftf.log
 
