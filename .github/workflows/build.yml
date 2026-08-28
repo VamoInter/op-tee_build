@@ -32,21 +32,12 @@ jobs:
             dosfstools mtools cpio \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
-      # Cache toolchains (mesma key - nao invalida o existente)
       - name: Cache Toolchains
         id: cache-toolchains
         uses: actions/cache@v4
         with:
           path: optee-fvp/toolchains
           key: ${{ runner.os }}-optee-toolchains-v1
-
-      # Cache sources (separado para nao misturar)
-      - name: Cache Sources
-        id: cache-sources
-        uses: actions/cache@v4
-        with:
-          path: optee-fvp/sources
-          key: ${{ runner.os }}-optee-sources-v2
 
       - name: Sync OP-TEE Manifest
         run: |
@@ -55,16 +46,24 @@ jobs:
           repo init -u https://github.com/OP-TEE/manifest.git -m fvp.xml
           repo sync -j$(nproc) --no-clone-bundle
 
+      - name: Clone TF-A Tests
+        run: |
+          cd optee-fvp
+          if [ ! -d trusted-firmware-a-tests ]; then
+            git clone --depth 1 \
+              https://github.com/TrustedFirmware-A/tf-a-tests.git \
+              trusted-firmware-a-tests
+          fi
+
+          echo "=== TF-A Tests ==="
+          git -C trusted-firmware-a-tests rev-parse --short HEAD
+
       - name: Download toolchains
         if: steps.cache-toolchains.outputs.cache-hit != 'true'
         run: |
           cd optee-fvp/build
           make -f fvp.mk toolchains
 
-      # Build principal: OP-TEE + TF-A + Linux
-      # CFG_SECURE_PARTITION=y: traz helpers FF-A de memoria no OP-TEE
-      # CFG_CORE_SEL1_SPMC=y:   SPMC em S-EL1 (OP-TEE)
-      # DEBUG=1 no TF-A e OP-TEE: gera ELF/MAP sem quebrar testes
       - name: Build OP-TEE FVP
         run: |
           cd optee-fvp/build
@@ -75,30 +74,54 @@ jobs:
             -j$(nproc) \
             2>&1 | tee /tmp/build_optee.log
 
-      # Injetar nosso teste no TFTF
       - name: Inject test sources into TFTF
         run: |
-          TFTF=$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a-tests
-          FRAG=$TFTF/tftf/tests/runtime_services/secure_service/ffa_frag_mismatch
-          TEST_SRC=$GITHUB_WORKSPACE/tftf-tests
+          TFTF="$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a-tests"
+          TEST_SRC="$GITHUB_WORKSPACE/tftf-tests"
+
+          FRAG="$TFTF/tftf/tests/runtime_services/secure_service/ffa_frag_mismatch"
 
           mkdir -p "$FRAG"
 
-          # Copiar nosso arquivo de teste
           cp "$TEST_SRC/test_op_tee_oob_claude.c" "$FRAG/"
-
-          # Copiar mk e xml (define o test suite op-tee-oob)
           cp "$TEST_SRC/tests-op-tee-oob.mk" "$TFTF/tftf/tests/"
           cp "$TEST_SRC/tests-op-tee-oob.xml" "$TFTF/tftf/tests/"
 
-      # Build TFTF
+          echo "=== Arquivos injetados ==="
+          find "$FRAG" -maxdepth 1 -type f -print
+          ls -l "$TFTF/tftf/tests/"*op-tee-oob*
+
+      - name: Register TFTF test suite
+        run: |
+          TFTF="$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a-tests"
+
+          echo "=== Procurando mecanismo de registro dos testes ==="
+          grep -Rni \
+            "TESTS.*xml\|tests.*xml\|tests-op" \
+            "$TFTF/tftf" \
+            "$TFTF/Makefile" \
+            "$TFTF/make_helpers" \
+            2>/dev/null | head -100 || true
+
       - name: Build TFTF
         run: |
-          TFTF=$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a-tests
-          CROSS=$(ls "$GITHUB_WORKSPACE"/optee-fvp/toolchains/aarch64/bin/aarch64-*-gcc \
-                  | head -1 | sed 's/gcc$//')
+          TFTF="$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a-tests"
+
+          CROSS=$(find "$GITHUB_WORKSPACE/optee-fvp/toolchains/aarch64/bin" \
+            -type f -name 'aarch64-*-gcc' \
+            -print -quit | sed 's/gcc$//')
+
+          if [ -z "$CROSS" ]; then
+            echo "ERRO: cross compiler não encontrado"
+            find "$GITHUB_WORKSPACE/optee-fvp/toolchains" \
+              -type f -name '*gcc' | head -30
+            exit 1
+          fi
+
+          echo "CROSS_COMPILE=$CROSS"
 
           cd "$TFTF"
+
           make \
             CROSS_COMPILE="$CROSS" \
             PLAT=fvp \
@@ -110,8 +133,49 @@ jobs:
       - name: Locate TFTF binary
         if: always()
         run: |
-          echo "=== Procurando tftf.bin em toda a arvore ==="
-          find "$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a-tests" -iname "tftf.bin" -print
+          echo "=== Procurando tftf.bin ==="
+          find "$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a-tests" \
+            -type f \
+            -name "tftf.bin" \
+            -print
+
+      - name: Rebuild TF-A FIP with TFTF as BL33
+        run: |
+          TFTF="$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a-tests/build/fvp/debug/tftf.bin"
+          TFA="$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a"
+
+          if [ ! -f "$TFTF" ]; then
+            echo "ERRO: TFTF não encontrado:"
+            echo "$TFTF"
+            exit 1
+          fi
+
+          echo "=== TFTF ==="
+          ls -lh "$TFTF"
+
+          cd "$TFA"
+
+          make \
+            PLAT=fvp \
+            DEBUG=1 \
+            BL33="$TFTF" \
+            fip \
+            2>&1 | tee /tmp/build_fip_tftf.log
+
+      - name: Verify final images
+        if: always()
+        run: |
+          echo "=== BL31 ==="
+          find "$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a" \
+            -name "bl31.bin" -print
+
+          echo "=== FIP ==="
+          find "$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a" \
+            -name "fip.bin" -print
+
+          echo "=== TFTF ==="
+          find "$GITHUB_WORKSPACE/optee-fvp/trusted-firmware-a-tests" \
+            -name "tftf.bin" -print
 
       - name: Upload binaries
         if: always()
@@ -119,8 +183,10 @@ jobs:
         with:
           name: optee-fvp-binaries
           path: |
-            optee-fvp/trusted-firmware-a/build/fvp/release/bl1.bin
-            optee-fvp/trusted-firmware-a/build/fvp/release/fip.bin
+            optee-fvp/trusted-firmware-a/build/fvp/debug/bl1.bin
+            optee-fvp/trusted-firmware-a/build/fvp/debug/bl2.bin
+            optee-fvp/trusted-firmware-a/build/fvp/debug/bl31.bin
+            optee-fvp/trusted-firmware-a/build/fvp/debug/fip.bin
             optee-fvp/out/boot-fat.uefi.img
             optee-fvp/out/boot.scr
             optee-fvp/out-br/images/rootfs.cpio.gz
@@ -137,4 +203,5 @@ jobs:
           path: |
             /tmp/build_optee.log
             /tmp/build_tftf.log
+            /tmp/build_fip_tftf.log
           if-no-files-found: warn
