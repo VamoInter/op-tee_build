@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+  <testsuite name="PoC 1 FF-A Frag TX"
+             description="PoC 1 FF-A Memory Sharing Missing Validation">
+    <testcase name="PoC 1 Frag TX Bypass"
+              function="test_poc1_frag_tx_bypass" />
+  </testsuite>
+</testsuites>

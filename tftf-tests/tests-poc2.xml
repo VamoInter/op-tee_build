@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+  <testsuite name="PoC 2 FF-A Address Disclosure"
+             description="PoC 2 FF-A Protected Address Disclosure via FRAG_RX">
+    <testcase name="PoC 2 Address Disclosure"
+              function="test_poc2_address_disclosure" />
+  </testsuite>
+</testsuites>

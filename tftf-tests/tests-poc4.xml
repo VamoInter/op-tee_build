@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+  <testsuite name="PoC 4 FF-A Heap Leak"
+             description="PoC 4 FF-A Heap Leak via OOB Read">
+    <testcase name="PoC 4 FFA Heap Leak"
+              function="test_ffa_heap_leak" />
+  </testsuite>
+</testsuites>

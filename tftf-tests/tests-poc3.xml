@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+  <testsuite name="PoC 3 FF-A Retrieve Reclaim"
+             description="PoC 3 FF-A Retrieve and Reclaim Bypass">
+    <testcase name="PoC 3 Retrieve Reclaim"
+              function="test_poc3_retrieve_reclaim" />
+  </testsuite>
+</testsuites>
